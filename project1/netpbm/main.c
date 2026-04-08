@@ -18,6 +18,8 @@ Image function_noiseImage(Image img, float p);
 Image expandImage(Image img);
 Image shrinkImage(Image img);
 int label_components(Image img);
+Matrix smoothing_filter(Matrix m1, Matrix m2);
+Matrix median_filter(Matrix m1, Matrix m2);
 
 
 int main(int argc, const char * argv[]) {
@@ -25,17 +27,6 @@ int main(int argc, const char * argv[]) {
        //create blackWhiteImage:
        Image inputImage = readImage("/Users/Testarossa/Downloads/project1/project1/netpbm/car.ppm");
        Image blackWhiteImage = imageBlackWhite(inputImage);
-    //    Image blackWhiteImage = createImage(inputImage.height, inputImage.width);
-
-    //    for (int x = 0; x < inputImage.width; x++)
-    //        for (int y = 0; y < inputImage.height; y++)
-    //        {
-    //            if (inputImage.map[y][x].i > 127) {
-    //             blackWhiteImage.map[y][x].i = 255;
-    //            } else {
-    //             blackWhiteImage.map[y][x].i  = 0;
-    //            }
-    //        }
 
        //-------------------------------------------------------------------------------
        // COMMENT THIS FUNCTION IF YOU DON'T WANT IT TO RUN EVEY TIME
@@ -57,8 +48,6 @@ int main(int argc, const char * argv[]) {
        writeImage(blackWhiteImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/black-white.pbm");
 
     //-------------------------------------------------------------------------------
-       //create blackWhiteImage:
-
 
        // create noiseImage:
        float noiseProbability = 0.05f;
@@ -79,29 +68,41 @@ int main(int argc, const char * argv[]) {
        writeImage(noiseRemoved, "/Users/Testarossa/Downloads/project1/project1/netpbm/denoised.pbm");
 
        //-------------------------------------------------------------------------------
-       // Uncomment this after you finish your homework
        // Function that does threshold, noise and numbers of spanding and shrinking
        // COMMENT THIS FUNCTION IF YOU DON'T WANT IT TO RUN EVEY TIME
        //function_readImage();
 
+       //-------------------------------------------------------------------------------
+
        // label components
        label_components(blackWhiteImage);
+
+       // Matrix for smoothing
+       Matrix smoothMatrix = image2Matrix(inputImage);
+
+       // smooth image with averaging filter
+       double filter3x3[3][3] = {(double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9};
+       Matrix averagingFilter = createMatrixFromArray(&filter3x3[0][0], 3, 3);
+       Image smoothAvg = matrix2Image(smoothing_filter(smoothMatrix, averagingFilter), 0, 0.0);
+       writeImage(smoothAvg, "/Users/Testarossa/Downloads/project1/project1/netpbm/smoothed_avg.pgm");
+
+       // smooth image with median filter
+       Image smoothMedian = matrix2Image(median_filter(smoothMatrix, averagingFilter), 0, 0);
+       writeImage(smoothMedian, "/Users/Testarossa/Downloads/project1/project1/netpbm/smoothed_median.pgm");
+
+
+       //-------------------------------------------------------------------------------
 
         /* Delete back and white, noise, Expand and Shrink */
        deleteImage(inputImage);
        deleteImage(rotatedImage);
        deleteImage(invertedImage);
 
-
-
-
        printf("Program ends ... ");
 
 
        return 0;
 }
-
-
 
 //-------------------------------function_imageBlackWhite-------------------------------------------------
 /* function that receives an Image structure and an intensity threshold
@@ -122,9 +123,6 @@ int main(int argc, const char * argv[]) {
            }
     return blackwhite;
 }
-
-
-
 
 //--------------------------------Expand function-----------------------------------------------------------
 /* Expand operation */
@@ -161,7 +159,6 @@ Image expandImage(Image img) {
     }
     return expanded;
 }
-
 
 //--------------------------------Shrink function-----------------------------------------------------------
 /* Shrink operation */
@@ -231,12 +228,17 @@ Image function_noiseImage(Image img, float p) {
     return noiseImage;
 }
 
+//--------------------------------labeling + color grouping function-----------------------------------------------------------
+/* function that assigns labels to all pixel groups. This function receives an
+ image and identifies all connected components, then gives each component a random color.
+ */
+
 int label_components(Image img) {
     Matrix labels = createMatrix(img.height, img.width);
-    UnionFind *equiv = uf_create(8); //arbitrary;
+    UnionFind *equiv = uf_create(32); //arbitrary;
     
     // assigning a new label requires uf_make_label(uf);
-    // does this do top to bottom first?
+    // top to bottom, left to right
     for (int y = 0; y < img.height; y++)
     {
         for (int x = 0; x < img.width; x++)
@@ -261,6 +263,7 @@ int label_components(Image img) {
         }
     }
 
+    // for all valid pixels, merge components if equivalent
     for (int y = 0; y < img.height; y++)
     {
         for (int x = 0; x < img.width; x++)
@@ -272,6 +275,7 @@ int label_components(Image img) {
     }
 
 
+    // calculate and store the sizes of each component for thresholding
     int *component_size = calloc(equiv->size, sizeof(int)); // size enough for all labels
     for (int y = 0; y < labels.height; y++) {
         for (int x = 0; x < labels.width; x++) {
@@ -283,8 +287,10 @@ int label_components(Image img) {
         }
     }
     
-    int size_threshold = 40;
+    // minimum size for a component to be colored
+    int size_threshold = 30;
 
+    // Generate random colors
     unsigned char **colors = malloc(equiv->size * sizeof(unsigned char *));
     colors[0] = malloc(3 * sizeof(unsigned char));
     colors[0][0] = 0;
@@ -304,7 +310,7 @@ int label_components(Image img) {
         }
     }
 
-
+    // Create the output image
     Image output = createImage(img.height, img.width);
     for (int y = 0; y < img.height; y++) {
         for (int x = 0; x < img.width; x++) {
@@ -335,21 +341,101 @@ int label_components(Image img) {
         if (component_size[i] >= size_threshold)
             num_letters++;
     }
-    printf("Number of letters = %d\n", num_letters);
+    printf("Number of objects = %d\n", num_letters);
 
     writeImage(output, "image_colored.ppm");
 
     return 1;
 }
 
+//--------------------------------averaging filter-----------------------------------------------------------
+/* function that applies an averaging filter to the entire image to smooth it. The function assumes that
+ the filter matrix is already initialized with the correct values (1 / # of elements in the filter)
+ */
 
-// Image colorComponents(Image img, Matrix labels, int threshold){
-//     Image coloredImage = createImage(img.height, img.width);
-//     for (int x = 0; x < img.width; x++)
-//     {
-//         for (int y = 0; y < img.height; y++)
-//         {
+Matrix smoothing_filter(Matrix m1, Matrix m2) {
+    Matrix output = createMatrix(m1.height, m1.width);
 
-//         }
-//     }
-// }
+    if (m2.height > m1.height || m2.width > m1.width){
+        printf("Error: Filter size is greater than image size.");
+        return output;
+    }
+
+    // compute center of filter
+    int offset_x = (m2.width-1) / 2;
+    int offset_y = (m2.height-1) / 2;
+    
+    for (int y = 0; y < m1.height - m2.height + 1; y++) {
+        for (int x = 0; x < m1.width - m2.width + 1; x++) {
+            int avg = 0;
+            for(int i = 0; i < m2.height; i++){
+                for (int j = 0; j < m2.width; j++){
+                    avg += m1.map[y+i][x+j] * m2.map[i][j];
+                }
+            }
+
+            //output.map[y + offset_y][x + offset_x] = avg / (m2.height * m2.width);
+            output.map[y + offset_y][x + offset_x] = avg;
+        }  
+    }
+    
+    return output;
+}
+
+//--------------------------------median filter-----------------------------------------------------------
+/* function that applies a median filter to the entire image to smooth it.
+ */
+
+ // Comparison function for quicksort
+int compare(const void* a, const void* b) {
+   return (*(int*)a - *(int*)b);
+}
+
+Matrix median_filter(Matrix m1, Matrix m2) {
+    Matrix output = createMatrix(m1.height, m1.width);
+
+    if (m2.height > m1.height || m2.width > m1.width){
+        printf("Error: Filter size is greater than image size.");
+        return output;
+    }
+
+    // compute center of filter
+    int offset_x = (m2.width-1) / 2;
+    int offset_y = (m2.height-1) / 2;
+
+    int filtersize = m2.height*m2.width;
+
+    int *values = malloc(filtersize * sizeof(int));
+    
+    for (int y = 0; y < m1.height - m2.height + 1; y++) {
+        for (int x = 0; x < m1.width - m2.width + 1; x++) {
+            //int *values = malloc(filtersize * sizeof(int));
+            if (!values) {
+                printf("Memory allocation failed\n");
+                return output;
+            }
+
+            for(int i = 0; i < m2.height; i++){
+                for (int j = 0; j < m2.width; j++){
+
+                    values[i * m2.width + j] = m1.map[y+i][x+j];
+
+                    //avg += m1.map[y+i][x+j] * m2.map[i][j];
+                }
+            }
+            //find median with quicksort
+            qsort(values, filtersize, sizeof(int), compare);
+
+            //even or odd median
+            if (filtersize%2 == 0) {
+                output.map[y + offset_y][x + offset_x] = (values[filtersize/2] + values[filtersize/2 - 1]) / 2;
+            } else {
+                output.map[y + offset_y][x + offset_x] = values[(filtersize-1)/2];
+            }
+
+            //free(values);
+        }  
+    }
+    free(values);
+    return output;
+}
