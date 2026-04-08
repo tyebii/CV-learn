@@ -11,6 +11,7 @@
 #include "netpbm.h"
 #include <stdio.h>
 #include "unionfind.h"
+#include "config.h"
 
 // predeclaring function to flag as void return type
 Image imageBlackWhite(Image img);
@@ -25,7 +26,7 @@ Matrix median_filter(Matrix m1, Matrix m2);
 int main(int argc, const char * argv[]) {
     //-------------------------------------------------------------------------------
        //create blackWhiteImage:
-       Image inputImage = readImage("/Users/Testarossa/Downloads/project1/project1/netpbm/car.ppm");
+       Image inputImage = readImage(CAR_PATH);
        Image blackWhiteImage = imageBlackWhite(inputImage);
 
        //-------------------------------------------------------------------------------
@@ -42,30 +43,30 @@ int main(int argc, const char * argv[]) {
                invertedImage.map[y][x].b = 255 - inputImage.map[y][x].b;
                // Let's just ignore 'i' here; it's irrelevant if we want to save image as PPM.
            }
-       writeImage(rotatedImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/rotated.ppm");
-       writeImage(invertedImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/inverted.ppm");
-       writeImage(inputImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/gray.pgm");
-       writeImage(blackWhiteImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/black-white.pbm");
+       writeImage(rotatedImage, ROTATE_PATH);
+       writeImage(invertedImage, INVERT_PATH);
+       writeImage(inputImage, GRAY_PATH);
+       writeImage(blackWhiteImage, BLACKWHITE_PATH);
 
     //-------------------------------------------------------------------------------
 
        // create noiseImage:
        float noiseProbability = 0.05f;
        Image noiseImage = function_noiseImage(blackWhiteImage, noiseProbability);
-       writeImage(noiseImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/noise.pbm");
+       writeImage(noiseImage, NOISE_PATH);
 
 
        // create expandImage:
        Image expandedImage = expandImage(noiseImage);
-       writeImage(expandedImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/expanded.pbm");
+       writeImage(expandedImage, EXPANDED_PATH);
 
        // create shrinkImage:
        Image shrunkImage = shrinkImage(noiseImage);
-       writeImage(shrunkImage, "/Users/Testarossa/Downloads/project1/project1/netpbm/shrunken.pbm");
+       writeImage(shrunkImage, SHRUNKEN_PATH);
 
        // shrink and expand
        Image noiseRemoved = expandImage(shrinkImage(shrinkImage(expandedImage)));
-       writeImage(noiseRemoved, "/Users/Testarossa/Downloads/project1/project1/netpbm/denoised.pbm");
+       writeImage(noiseRemoved, DENOISED_PATH);
 
        //-------------------------------------------------------------------------------
        // Function that does threshold, noise and numbers of spanding and shrinking
@@ -84,11 +85,11 @@ int main(int argc, const char * argv[]) {
        double filter3x3[3][3] = {(double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9};
        Matrix averagingFilter = createMatrixFromArray(&filter3x3[0][0], 3, 3);
        Image smoothAvg = matrix2Image(smoothing_filter(smoothMatrix, averagingFilter), 0, 0.0);
-       writeImage(smoothAvg, "/Users/Testarossa/Downloads/project1/project1/netpbm/smoothed_avg.pgm");
+       writeImage(smoothAvg, SMOOTH_AVG_PATH);
 
        // smooth image with median filter
        Image smoothMedian = matrix2Image(median_filter(smoothMatrix, averagingFilter), 0, 0);
-       writeImage(smoothMedian, "/Users/Testarossa/Downloads/project1/project1/netpbm/smoothed_median.pgm");
+       writeImage(smoothMedian, SMOOTH_MEDIAN_PATH);
 
 
        //-------------------------------------------------------------------------------
