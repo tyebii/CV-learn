@@ -25,6 +25,7 @@ Image sobel(Image img);
 Image canny(Image img);
 void edgeDetection(char *inputFilename, char *sobelFilename, char
 *cannyFilename);
+void computeLawValues(Matrix img, int texAmt);
 
 
 int main(int argc, const char * argv[]) {
@@ -100,6 +101,16 @@ int main(int argc, const char * argv[]) {
 
         // workaround for hough edge detection
         edgeDetection(DESK_PATH, DESK_SOBEL, DESK_CANNY);
+
+       //-------------------------------------------------------------------------------
+
+        Image tex1Image = readImage(TEX1_PATH);
+        Matrix texMatrix = image2Matrix(tex1Image);
+
+        Matrix texSmoothed = smoothing_filter(texMatrix, averagingFilter);
+        writeImage(matrix2Image(texSmoothed, 0, 0.0), "tex_smooth.ppm");
+        //computeLawValues(texMatrix);
+        computeLawValues(texSmoothed, 5);
 
        //-------------------------------------------------------------------------------
 
@@ -630,3 +641,176 @@ void edgeDetection(char *inputFilename, char *sobelFilename, char
     Image cannyImage = canny(inputImage);
     writeImage(imageBlackWhite(cannyImage, 30), cannyFilename);
 }
+
+//------------------------------------image segmentation------------------------------------
+
+// function to compute law values for a given image
+void computeLawValues(Matrix img, int numTextures){
+
+    printf("\nNumber of textures: %d", numTextures);
+    
+    // define law filters
+    double filters[5][5] = { 
+        {1, 4, 6, 4, 1}, 
+        {-1, -2, 0, -2, 1},
+        {-1, 0, 2, 0, -1},
+        {1, -4, 6, -4, 1},
+        {-1, 2, 0, -2, 1}
+    };
+
+    // create a matrix for holding pixel x,y and that pixel's 25 measures
+    Matrix measures = createMatrix(img.height*img.width, 25);
+
+    for (int i=0; i<5; i++) {
+        for(int j=0; j<5; j++){
+
+            // generate law mask
+            Matrix m = createMatrix(5, 5);
+            for(int r=0; r<5; r++){
+                for(int c=0; c<5; c++){
+                    //-1 -2 0 for i=0 j=1
+                    //
+                    m.map[r][c] = filters[j][c] * filters[i][r];
+                }
+            }
+
+            // apply mask
+            Matrix feature = convolve(img, m);
+
+            // loop through masked image and set each descriptor array value to masked image value
+            for(int y=0; y<feature.height; y++){
+                for(int x=0; x<feature.width; x++){
+                    measures.map[x + (y*feature.width)][j + (i*5)] = feature.map[y][x];
+                }
+            }
+        }
+    }
+
+    // apply k-means clustering
+    // randomly initialize cluster centers
+    // int c1[] = measures.map[rand() % measures.height];
+    // int c2[] = measures.map[rand() % measures.height];
+    // int c3[] = measures.map[rand() % measures.height];
+
+    // Randomly initialize as many cluster centers as there are textures
+    double** centers = malloc(numTextures * sizeof(double*));
+
+    for(int i = 0; i < numTextures; i++){
+        centers[i] = malloc(25 * sizeof(double));
+        memcpy(centers[i], measures.map[rand() % measures.height], 25 * sizeof(double));
+    }
+
+    // double c1[25];
+    // memcpy(c1, measures.map[rand() % measures.height], 25 * sizeof(double));
+    // double c2[25];
+    // memcpy(c2, measures.map[rand() % measures.height], 25 * sizeof(double));
+    // double c3[25];
+    // memcpy(c3, measures.map[rand() % measures.height], 25 * sizeof(double));
+    
+    // Define cluster colors
+    int** colors = malloc(numTextures * sizeof(*colors));
+
+    for(int i = 0; i < numTextures; i++){
+        colors[i] = malloc(3 * sizeof(int));
+        colors[i][0] = (rand() % 195) + 30;
+        colors[i][1] = (rand() % 195) + 30;
+        colors[i][2] = (rand() % 195) + 30;
+    }
+
+    Matrix labels = createMatrix(img.height, img.width);
+
+    int converge = 0;
+
+    //change to while not converged (unchanging)
+    while(converge != 1){
+        double* counts = calloc(numTextures, sizeof(double));
+        double** newCenters = malloc(numTextures * sizeof(double*));
+
+        for(int i = 0; i < numTextures; i++){
+            newCenters[i] = calloc(25, sizeof(double));
+        }
+
+        // calculate the difference between each point and each cluster center, lowest value wins
+        // for each pixel
+        for(int i=0; i<measures.height; i++){
+            double* distances = calloc(numTextures, sizeof(double));
+            // find which center the pixel is closest to using euclidean distance for each feature
+            for(int j=0; j<measures.width; j++){
+                for (int k=0; k<numTextures; k++){
+                    double d = centers[k][j] - measures.map[i][j];
+                    distances[k] += d*d;
+                }
+            }
+
+            int mindex = 0;
+            // assign points to cluster labels
+            for(int j=0; j<numTextures;j++){
+                if (distances[j] < distances[mindex]){
+                    mindex = j;
+                }
+            }
+
+            labels.map[(int)(i / img.width)][i%img.width] = mindex;
+            for(int k=0; k<measures.width; k++){
+                newCenters[mindex][k] += measures.map[i][k];
+            }
+            counts[mindex] += 1;
+
+            free(distances);
+        }
+
+        converge = 1;
+        // compute new cluster center, end if cluster has not changed
+        for(int i=0; i<measures.width; i++){
+            for(int j=0;j<numTextures;j++){
+                if (counts[j] == 0) {
+                    printf("cluster centers collapsed");
+                    break;
+                }
+                double val = newCenters[j][i] / counts[j];
+                if (fabs(centers[j][i] - val) > 10){
+                    converge = 0;
+                }
+                centers[j][i] = val;
+            }
+        }
+
+        // free temporary allocations
+        for(int i = 0; i < numTextures; i++){
+            free(newCenters[i]);
+        }
+        free(newCenters);
+        free(counts);
+    }
+
+    Image output = matrix2Image(createMatrix(img.height, img.width), 0, 1.0);
+
+
+    // map values to img
+    for(int i=0; i<measures.height; i++){
+        int y = i / img.width; 
+        int x = i%img.width;
+        int num = labels.map[(int)(y)][x];
+        output.map[y][x].r = colors[num][0];
+        output.map[y][x].g = colors[num][1];
+        output.map[y][x].b = colors[num][2];
+
+    }
+
+    //output.map[(int)(i / img.width)][i%img.width].r = 255;
+
+    //need to add extra loop for recomputing cluster center
+    // have output be a map of labels (0,1,2 etc)
+    // re-scan array, and based on the label value, record its xy into average -> add each coord to total then divide by amt of points (counter)
+    // then get the texture values at the cluster center
+
+    writeImage(output, "law.ppm");
+
+}
+
+// compute a law mask
+// apply it
+// get a corresponding value for tex -> output to pixel's array of results
+
+// use k-means (with a new matrix that will be our output image) to assign each point's color to their cluster center\
+// for k means centers, use random numbers?
