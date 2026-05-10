@@ -25,7 +25,10 @@ Image sobel(Image img);
 Image canny(Image img);
 void edgeDetection(char *inputFilename, char *sobelFilename, char
 *cannyFilename);
-void computeLawValues(Matrix img, int texAmt);
+Image computeLawValues(Matrix img, int texAmt);
+Matrix padMatrix(Matrix m, int padding);
+Matrix cropMatrix(Matrix m, int crop);
+Image segmentTexture(Image inputImg, int segments);
 
 
 int main(int argc, const char * argv[]) {
@@ -104,13 +107,8 @@ int main(int argc, const char * argv[]) {
 
        //-------------------------------------------------------------------------------
 
-        Image tex1Image = readImage(TEX1_PATH);
-        Matrix texMatrix = image2Matrix(tex1Image);
-
-        Matrix texSmoothed = smoothing_filter(texMatrix, averagingFilter);
-        writeImage(matrix2Image(texSmoothed, 0, 0.0), "tex_smooth.ppm");
-        //computeLawValues(texMatrix);
-        computeLawValues(texSmoothed, 5);
+        Image texImage = readImage(TEX1_PATH);
+        writeImage(segmentTexture(texImage, 3), "law.ppm");
 
        //-------------------------------------------------------------------------------
 
@@ -372,6 +370,7 @@ int label_components(Image img) {
 //------------------------------------averaging filter------------------------------------
 /* function that applies an averaging filter to the entire image to smooth it. The function assumes that
  the filter matrix is already initialized with the correct values (1 / # of elements in the filter)
+ UPDATE: Input image is cropped by filter size (assumes correct padding)
  */
 
 Matrix smoothing_filter(Matrix m1, Matrix m2) {
@@ -642,10 +641,63 @@ void edgeDetection(char *inputFilename, char *sobelFilename, char
     writeImage(imageBlackWhite(cannyImage, 30), cannyFilename);
 }
 
+//------------------------------------helper functions------------------------------------
+// pads a matrix with pixels by replicating edge pixel value.
+Matrix padMatrix(Matrix m, int padding){
+    int newHeight = m.height + padding*2;
+    int newWidth = m.width + padding*2;
+    
+    Matrix result = createMatrix(newHeight, newWidth);
+
+    for(int y = 0; y < newHeight; y++){
+        for(int x = 0; x < newWidth; x++){
+            int py = y-padding;
+            int px = x-padding;
+
+            if(py < 0) py = 0;
+            if(py >= m.height) py = m.height-1;
+            if(px < 0) px = 0;
+            if(px >= m.width) px = m.width-1;
+
+            result.map[y][x] = m.map[py][px];
+        }
+    }
+    return result;
+}
+
+// crops a matrix
+Matrix cropMatrix(Matrix m, int crop){
+
+    if (crop*2 >= m.height || crop*2 >= m.width){
+        printf("crop amount greater than image size\n");
+        return m;
+    }
+    
+    Matrix result = createMatrix(m.height - 2*crop, m.width - 2*crop);
+
+    for(int y = 0; y < result.height; y++){
+        for(int x = 0; x < result.width; x++){
+            result.map[y][x] = m.map[y+crop][x+crop];
+        }
+    }
+    return result;
+}
+
 //------------------------------------image segmentation------------------------------------
 
+// function to segment an image given number of textures
+Image segmentTexture(Image inputImg, int segments){
+    double filter3x3[3][3] = {(double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9, (double)1/9};
+    Matrix averagingFilter = createMatrixFromArray(&filter3x3[0][0], 3, 3);
+    Matrix texMatrix = padMatrix(image2Matrix(inputImg), 1);
+    Matrix texSmoothed = cropMatrix(smoothing_filter(texMatrix, averagingFilter), 1);
+    writeImage(matrix2Image(texSmoothed, 0, 0.0), "tex_smooth.ppm");
+    // params: image matrix, # of textures
+    return computeLawValues(texSmoothed, segments);
+}
+
 // function to compute law values for a given image
-void computeLawValues(Matrix img, int numTextures){
+Image computeLawValues(Matrix img, int numTextures){
 
     printf("\nNumber of textures: %d", numTextures);
     
@@ -657,6 +709,14 @@ void computeLawValues(Matrix img, int numTextures){
         {1, -4, 6, -4, 1},
         {-1, 2, 0, -2, 1}
     };
+
+    // define averaging filter for later
+    Matrix avgFilter = createMatrix(8, 8);
+    for(int y = 0; y < 8; y++) {
+        for(int x = 0; x < 8; x++){
+            avgFilter.map[y][x] = (double) 1.0 / 64.0;
+        }
+    }
 
     // create a matrix for holding pixel x,y and that pixel's 25 measures
     Matrix measures = createMatrix(img.height*img.width, 25);
@@ -674,23 +734,44 @@ void computeLawValues(Matrix img, int numTextures){
                 }
             }
 
-            // apply mask
-            Matrix feature = convolve(img, m);
+            Matrix padImg = padMatrix(img, 2);
 
-            // loop through masked image and set each descriptor array value to masked image value
-            for(int y=0; y<feature.height; y++){
-                for(int x=0; x<feature.width; x++){
-                    measures.map[x + (y*feature.width)][j + (i*5)] = feature.map[y][x];
+            // apply mask
+            Matrix feature = cropMatrix(convolve(padImg, m), 2);
+
+            // compute local energy for each pixel
+            Matrix temp = padMatrix(feature, 4);
+            for(int y=0; y<temp.height; y++){
+                for(int x=0; x<temp.width; x++){
+                    temp.map[y][x] = temp.map[y][x] * temp.map[y][x];
                 }
             }
+            // averaging within an 8x8 area
+            Matrix energy = cropMatrix(smoothing_filter(temp, avgFilter), 4);
+
+            if(j + (i*5) == 5) {
+                writeImage(matrix2Image(feature, 1, 1.0), "law_features.ppm");
+                writeImage(matrix2Image(energy, 1, 1.0), "law_energy.ppm");
+            }
+
+            // loop through masked image and set each descriptor array value to energy image value
+            for(int y=0; y<energy.height; y++){
+                for(int x=0; x<energy.width; x++){
+                    measures.map[x + (y*energy.width)][j + (i*5)] = energy.map[y][x];
+                }
+            }
+
+            // for(int y=0; y<feature.height; y++){
+            //     for(int x=0; x<feature.width; x++){
+            //         measures.map[x + (y*feature.width)][j + (i*5)] = feature.map[y][x];
+            //     }
+            // }
+
+            
         }
     }
 
     // apply k-means clustering
-    // randomly initialize cluster centers
-    // int c1[] = measures.map[rand() % measures.height];
-    // int c2[] = measures.map[rand() % measures.height];
-    // int c3[] = measures.map[rand() % measures.height];
 
     // Randomly initialize as many cluster centers as there are textures
     double** centers = malloc(numTextures * sizeof(double*));
@@ -699,13 +780,6 @@ void computeLawValues(Matrix img, int numTextures){
         centers[i] = malloc(25 * sizeof(double));
         memcpy(centers[i], measures.map[rand() % measures.height], 25 * sizeof(double));
     }
-
-    // double c1[25];
-    // memcpy(c1, measures.map[rand() % measures.height], 25 * sizeof(double));
-    // double c2[25];
-    // memcpy(c2, measures.map[rand() % measures.height], 25 * sizeof(double));
-    // double c3[25];
-    // memcpy(c3, measures.map[rand() % measures.height], 25 * sizeof(double));
     
     // Define cluster colors
     int** colors = malloc(numTextures * sizeof(*colors));
@@ -796,21 +870,5 @@ void computeLawValues(Matrix img, int numTextures){
         output.map[y][x].b = colors[num][2];
 
     }
-
-    //output.map[(int)(i / img.width)][i%img.width].r = 255;
-
-    //need to add extra loop for recomputing cluster center
-    // have output be a map of labels (0,1,2 etc)
-    // re-scan array, and based on the label value, record its xy into average -> add each coord to total then divide by amt of points (counter)
-    // then get the texture values at the cluster center
-
-    writeImage(output, "law.ppm");
-
+    return output;
 }
-
-// compute a law mask
-// apply it
-// get a corresponding value for tex -> output to pixel's array of results
-
-// use k-means (with a new matrix that will be our output image) to assign each point's color to their cluster center\
-// for k means centers, use random numbers?

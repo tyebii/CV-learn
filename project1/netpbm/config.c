@@ -18,4 +18,5 @@ const char *HOUGH_IMG_PATH = "hough.pbm";
 const char *DESK_PATH = "desk.pgm";
 const char *DESK_CANNY = "desk_canny.pbm";
 const char *DESK_SOBEL = "desk_sobel.pbm";
-const char *TEX1_PATH = "tex3.pgm";
+const char *TEX1_PATH = "tex1.pgm";
+const char *TEX3_PATH = "tex3.pgm";

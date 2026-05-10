@@ -19,6 +19,7 @@ extern const char *DESK_PATH;
 extern const char *DESK_CANNY;
 extern const char *DESK_SOBEL;
 extern const char *TEX1_PATH;
+extern const char *TEX3_PATH;
 
 
 #endif
